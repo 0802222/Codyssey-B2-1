@@ -1,306 +1,144 @@
-# 진입점 : argparse 파싱 -> 서비스 호출
-# 역할 1. 명령어 체계 정의 (argparse로 add/list/search/summary/budget/category/update/delete/import/export 서브커맨드 등록)
-# 역할 2. 파싱된 인자를 서비스 계층에 전달 (실제 로직은 여기서 처리하지 않음)
-# 역할 3. 프로그램 실행/종료 관리 (sys.exit())
+"""
+진입점. 실행: python -m budget_app <command> [options]
 
-import sys
+역할: argparse로 명령어 체계를 정의하고, 파싱된 인자를 알맞은 run_xxx()에 전달한다.
+실제 검증/저장 로직은 여기 없다 (app.py -> services.py -> repository.py로 위임).
+"""
+
 import argparse
-from decorators import handle_errors
-from services import TransactionService, BudgetService, CategoryService
+import sys
+from budget_app.cli.app import (
+    run_add,
+    run_budget_set,
+    run_category_add,
+    run_category_list,
+    run_category_remove,
+    run_category_rename,
+    run_search,
+    run_summary,
+    run_update,
+    run_delete,
+    run_list,
+    run_search,
+    run_summary,
+    run_update,
+)
+from budget_app.sub.decorators import handle_errors
+from budget_app.core.exceptions import ValidationError
+from budget_app.sub.io_csv import export_csv, import_csv
 
-def build_parser():
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="budget_app", 
-        description="나만의 용돈 기입장"
+        prog="budget_app",
+        description="나만의 용돈 기입장 - 콘솔 가계부 프로그램",
     )
-    
-    parser.add_argument(
-        "--data-dir", 
-        default="./data", 
-        help="데이터 저장 폴더"
-    )
-    
-    sub = parser.add_subparsers(
-        dest="command", 
-        required=True, 
-        help="실행할 명령"
-    )
-    
-    # add: 거래 추가
-    sub.add_parser(
-        "add", 
-        help="거래를 추가합니다. (대화형: 날짜/타입/카테고리/금액/메모/태그 순차 입력)"
-    )
+    parser.add_argument("--data-dir", default="./data", help="데이터 파일을 저장/조회할 폴더 (기본값: ./data)")
 
-    # list: 거래 목록 
-    list_parser = sub.add_parser(
-        "list", 
-        help="거래 목록을 최신순으로 조회합니다."
-    )
-    
-    list_parser.add_argument(
-        "--limit", 
-        type=int, 
-        default=10, 
-        help="출력할 최대 거래 건수(기본 값: 10"
-    )
+    sub = parser.add_subparsers(dest="command", required=True, help="실행할 명령")
 
-    # search: 거래 검색
-    search_parser = sub.add_parser(
-        "search",
-        help="조건(기간/카테고리/타입/메모/태그)에 맞는 거래를 검색합니다."
-    )
-    
-    search_parser.add_argument(
-        "--from",
-        dest="date_from",
-        metavar="YYYY-MM-DD",
-        help="검색 시작 날짜(포함)"
-    )
-    
-    search_parser.add_argument(
-        "--to",
-        dest="date_to",
-        metavar="YYYY-MM-DD",
-        help="검색 종료 날짜(포함)"
-    )
-    
-    search_parser.add_argument(
-        "--category",
-        help="검색할 카테고리명 (예: food, transport, rent ..)")
-    
-    search_parser.add_argument(
-        "--type",
-        help="거래 타입(income | expense)"
-    )
-    
-    search_parser.add_argument(
-        "--q",
-        metavar="KEYWORD",
-        help="메모에 포함된 키워드로 검색"
-    )
-    
-    search_parser.add_argument(
-        "--tag",
-        help="특정 태그가 포함된 거래만 검색"
-    )
+    sub.add_parser("add", help="거래를 추가합니다 (대화형 입력)")
 
-    # summary: 월별 요약
-    summary_parser = sub.add_parser(
-        "summary",
-        help="특정 월의 총수입/총지출/잔액과 카테고리별 지출 TOP 3를 출력합니다."
-    )
-    summary_parser.add_argument(
-        "--month",
-        required=True,
-        metavar="YYYY-MM",
-        help="요약할 대상 월 (예: 2026-08)"
-    )
-    
-    summary_parser.add_argument(
-        "--top",
-        type=int,
-        default=3,
-        help="지출 상위 카태고리 출력 개수(기본값: 3)"
-    )
+    list_p = sub.add_parser("list", help="거래 목록을 최신순으로 조회합니다")
+    list_p.add_argument("--limit", type=int, default=10, help="출력할 최대 거래 건수 (기본값: 10)")
 
-    # budget: 예산 설정/조회
-    budget_parser = sub.add_parser(
-        "budget",
-        help="월별 예산을 설정하거나 조회합니다."
-    )
-    
-    budget_sub = budget_parser.add_subparsers(
-        dest="budget_command",
-        required=True,
-        help="budget 하위 명령"
-    )
-    
-    set_parser = budget_sub.add_parser(
-        "set",
-        help="특정 월의 예산 금액을 설정합니다."
-    )
-    
-    set_parser.add_argument(
-        "--month",
-        required=True,
-        metavar="YYYY-MM",
-        help="예산을 설정할 월 (예: 2026-09)"
-    )
-    
-    set_parser.add_argument(
-        "--amount",
-        type=int,
-        required=True,
-        help="설정할 예산 금액 (양수 정수, 원 단위)"
-    )
-    
-    # category: 카테고리 관리
-    category_parser = sub.add_parser(
-        "category",
-        help="카테고리를 추가/조회/삭제합니다"
-    )
-    
-    category_sub = category_parser.add_subparsers(
-        dest="category_command", 
-        required=True, 
-        help="category 하위 명령"
-    )
+    search_p = sub.add_parser("search", help="조건에 맞는 거래를 검색합니다")
+    search_p.add_argument("--from", dest="date_from", metavar="YYYY-MM-DD", help="검색 시작 날짜")
+    search_p.add_argument("--to", dest="date_to", metavar="YYYY-MM-DD", help="검색 종료 날짜")
+    search_p.add_argument("--category", help="카테고리로 필터링")
+    search_p.add_argument("--type", choices=["income", "expense"], help="타입으로 필터링")
+    search_p.add_argument("--q", metavar="KEYWORD", help="메모 키워드 검색")
+    search_p.add_argument("--tag", help="태그로 필터링")
 
-    category_sub.add_parser(
-        "add",
-        help="새 카테고리를 추가합니다 (대화형: 카테고리명 입력)"
-    )
-    
-    category_sub.add_parser(
-        "list",
-        help="등록된 카테고리 목록을 출력합니다"
-    )
-    
-    category_remove_parser = category_sub.add_parser(
-        "remove",
-        help="카테고리를 삭제합니다 (사용 중인 카테고리는 삭제 제한/대체 필요)"
-    )
-    
-    category_remove_parser.add_argument(
-        "--name",
-        required=True,
-        help="삭제할 카테고리명"
-    )
+    summary_p = sub.add_parser("summary", help="월별 요약을 출력합니다")
+    summary_p.add_argument("--month", required=True, metavar="YYYY-MM", help="요약 대상 월")
+    summary_p.add_argument("--top", type=int, default=3, help="지출 상위 카테고리 개수 (기본값: 3)")
 
-    # update: 거래 수정
-    update_parser = sub.add_parser(
-        "update",
-        help="id로 특정 거래의 필드를 수정합니다 (없는 id는 오류 처리)"
-    )
-    
-    update_parser.add_argument(
-        "--id",
-        required=True,
-        help="수정할 거래의 id (예: TX-000012)"
-    )
-    
-    update_parser.add_argument(
-        "--date",
-        metavar="YYYY-MM-DD",
-        help="변경할 날짜 (미입력 시 기존 값 유지)"
-    )
-    
-    update_parser.add_argument(
-        "--type",
-        choices=["income", "expense"],
-        help="변경할 타입 (income 또는 expense)"
-    )
-    
-    update_parser.add_argument(
-        "--category",
-        help="변경할 카테고리 (등록된 카테고리만 가능)"
-    )
-    
-    update_parser.add_argument(
-        "--amount",
-        type=int,
-        help="변경할 금액 (양수 정수)"
-    )
-    
-    update_parser.add_argument(
-        "--memo",
-        help="변경할 메모"
-    )
-    
-    update_parser.add_argument(
-        "--tags",
-        help="변경할 태그 (쉼표로 구분, 예: meal,lunch)"
-    )
+    budget_p = sub.add_parser("budget", help="월별 예산을 설정/조회합니다")
+    budget_sub = budget_p.add_subparsers(dest="budget_command", required=True)
+    budget_set_p = budget_sub.add_parser("set", help="월 예산을 설정합니다")
+    budget_set_p.add_argument("--month", required=True, metavar="YYYY-MM")
+    budget_set_p.add_argument("--amount", dest="amount_str", required=True, help="예산 금액")
 
-    # delete: 거래 삭제
-    delete_parser = sub.add_parser(
-        "delete",
-        help="id로 특정 거래를 삭제합니다 (없는 id는 오류 처리)"
-    )
+    category_p = sub.add_parser("category", help="카테고리를 관리합니다")
+    category_sub = category_p.add_subparsers(dest="category_command", required=True)
+    category_sub.add_parser("add", help="카테고리를 추가합니다 (대화형)")
+    category_sub.add_parser("list", help="카테고리 목록을 조회합니다")
     
-    delete_parser.add_argument(
-        "--id",
-        required=True,
-        help="삭제할 거래의 id (예: TX-000012)"
-    )
+    category_update_p = category_sub.add_parser("rename", help="카테고리 이름을 변경합니다")
+    category_update_p.add_argument("--old-name", required=True)
+    category_update_p.add_argument("--new-name", required=True)
 
-    # import: CSV 가져오기
-    import_parser = sub.add_parser(
-        "import",
-        help="CSV 파일에서 거래 내역을 일괄 등록합니다"
-    )
-    
-    import_parser.add_argument(
-        "--from",
-        dest="import_from",
-        required=True,
-        metavar="CSV_PATH",
-        help="가져올 CSV 파일 경로"
-    )
+    category_remove_p = category_sub.add_parser("remove", help="카테고리를 삭제합니다")
+    category_remove_p.add_argument("--name", required=True)
 
-    # export: CSV 내보내기
-    export_parser = sub.add_parser(
-        "export",
-        help="조건에 맞는 거래를 CSV 파일로 내보냅니다"
-    )
-    
-    export_parser.add_argument(
-        "--out",
-        required=True,
-        metavar="CSV_PATH",
-        help="저장할 CSV 파일 경로"
-    )
-    
-    export_parser.add_argument(
-        "--month",
-        metavar="YYYY-MM",
-        help="내보낼 대상 월 (--from/--to 대신 사용 가능)"
-    )
-    
-    export_parser.add_argument(
-        "--from",
-        dest="date_from",
-        metavar="YYYY-MM-DD",
-        help="내보낼 시작 날짜 (--month 대신 --from/--to 조합 사용)"
-    )
-    
-    export_parser.add_argument(
-        "--to",
-        dest="date_to",
-        metavar="YYYY-MM-DD",
-        help="내보낼 종료 날짜"
-    )
+    update_p = sub.add_parser("update", help="id로 거래를 수정합니다")
+    update_p.add_argument("--id", required=True)
+    update_p.add_argument("--date", metavar="YYYY-MM-DD")
+    update_p.add_argument("--type", choices=["income", "expense"])
+    update_p.add_argument("--category")
+    update_p.add_argument("--amount", type=int)
+    update_p.add_argument("--memo")
+    update_p.add_argument("--tags", help="쉼표로 구분 (예: meal,lunch)")
+
+    delete_p = sub.add_parser("delete", help="id로 거래를 삭제합니다")
+    delete_p.add_argument("--id", required=True)
+
+    import_p = sub.add_parser("import", help="CSV에서 거래를 일괄 등록합니다")
+    import_p.add_argument("--from", dest="import_from", required=True, metavar="CSV_PATH")
+
+    export_p = sub.add_parser("export", help="조건에 맞는 거래를 CSV로 내보냅니다")
+    export_p.add_argument("--out", required=True, metavar="CSV_PATH")
+    export_p.add_argument("--month", metavar="YYYY-MM")
+    export_p.add_argument("--from", dest="date_from", metavar="YYYY-MM-DD")
+    export_p.add_argument("--to", dest="date_to", metavar="YYYY-MM-DD")
 
     return parser
-   
+
 
 @handle_errors
-def main():
+def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    
-    if args.command == "add" :
+
+    if args.command == "add":
         run_add(args)
-    elif args.command == "list" :
+    elif args.command == "list":
         run_list(args)
     elif args.command == "search":
         run_search(args)
     elif args.command == "summary":
         run_summary(args)
     elif args.command == "budget":
-        run_budget(args)
+        if args.budget_command == "set":
+            run_budget_set(args)
     elif args.command == "category":
-        run_category(args)
+        if args.category_command == "add":
+            run_category_add(args)
+        elif args.category_command == "list":
+            run_category_list(args)
+        elif args.category_command == "remove":
+            run_category_remove(args)
+        elif args.category_command == "rename":
+            run_category_rename(args)
     elif args.command == "update":
         run_update(args)
     elif args.command == "delete":
         run_delete(args)
     elif args.command == "import":
-        run_import(args)
+        imported, skipped = import_csv(args.data_dir, args.import_from)
+        print(f"[완료] imported={imported}, skipped={skipped}")
     elif args.command == "export":
-        run_export(args)
-    sys.exit(0) # 정상 종료
-    
+        if not args.month and not (args.date_from and args.date_to):
+            raise ValidationError(
+                "export 조건이 필요합니다.",
+                hint="--month YYYY-MM 또는 --from/--to를 함께 지정하세요.",
+            )
+        count = export_csv(args.data_dir, args.out, args.month, args.date_from, args.date_to)
+        print(f"[완료] {args.out} ({count} records)")
+
+    sys.exit(0)
+
+
 if __name__ == "__main__":
     main()
