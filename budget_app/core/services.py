@@ -7,7 +7,7 @@ __main__.py(CLI)와 repository.py(파일 I/O) 사이의 중간 계층.
 
 import os
 from collections import defaultdict
-from typing import Iterator, Optional
+from typing import Iterable, Iterator, Optional
 
 from budget_app.core.exceptions import CategoryInUseError, DuplicateError, NotFoundError, ValidationError
 from budget_app.core.models import Budget, Category, Transaction
@@ -85,12 +85,14 @@ class TransactionService:
         self.path = os.path.join(data_dir, "transactions.jsonl")
         self.category_service = CategoryService(data_dir)
 
-    def _next_id(self) -> str:
+    def _max_id_num(self, transactions: list[Transaction]) -> int:
         max_num = 0
-        for tx in read_transactions(self.path):
-            num = int(tx.id.split("-")[-1])
-            max_num = max(max_num, num)
-        return f"TX-{max_num + 1:06d}"
+        for tx in transactions:
+            max_num = max(max_num, int(tx.id.split("-")[-1]))
+        return max_num
+
+    def _next_id(self) -> str:
+        return f"TX-{self._max_id_num(list(read_transactions(self.path))) + 1:06d}"
 
     def add(
         self,
@@ -121,6 +123,53 @@ class TransactionService:
         )
         append_transaction(self.path, tx)
         return tx
+
+    def import_batch(self, entries: Iterable[dict]) -> tuple[int, int]:
+        """검증된 거래를 메모리에 버퍼링한 뒤 한 번에 원자적으로 반영한다.
+
+        rewrite_all_transactions(temp 파일 + os.replace)로 한 번에 쓰기 때문에,
+        쓰기 도중 실패해도 원본 파일은 그대로 남고(all-or-nothing) 부분 반영되지 않는다.
+        """
+        existing = list(read_transactions(self.path))
+        next_num = self._max_id_num(existing)
+
+        buffered: list[Transaction] = []
+        skipped = 0
+        for entry in entries:
+            try:
+                date = entry["date"]
+                type_ = entry["type_"]
+                category = entry["category"]
+                amount_str = entry["amount_str"]
+                memo = entry.get("memo")
+                tags = entry.get("tags") or []
+
+                validate_date(date)
+                validate_type(type_)
+                category = validate_category_name(category)
+                amount = validate_amount(amount_str)
+                if not self.category_service.exists(category):
+                    raise ValidationError(f"등록되지 않은 카테고리입니다: {category}")
+
+                next_num += 1
+                buffered.append(
+                    Transaction(
+                        id=f"TX-{next_num:06d}",
+                        type=type_,
+                        date=date,
+                        amount=amount,
+                        category=category,
+                        memo=memo,
+                        tags=tags,
+                    )
+                )
+            except ValidationError:
+                skipped += 1
+
+        if buffered:
+            rewrite_all_transactions(self.path, existing + buffered)
+
+        return len(buffered), skipped
 
     def list_transactions(self, limit: int = 10) -> list[Transaction]:
         all_tx = sorted(read_transactions(self.path), key=lambda t: t.date, reverse=True)

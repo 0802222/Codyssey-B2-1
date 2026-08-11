@@ -8,37 +8,37 @@ CSV 스키마 (고정):
 """
 
 import csv
+from typing import Iterator
 
-from budget_app.core.exceptions import ValidationError
 from budget_app.core.services import TransactionService
 from budget_app.sub.validators import parse_tags
 
 CSV_FIELDS = ["date", "type", "category", "amount", "memo", "tags"]
 
 
-def import_csv(data_dir: str, csv_path: str) -> tuple[int, int]:
-    """CSV에서 거래를 일괄 등록한다. (imported, skipped) 건수를 반환."""
-    service = TransactionService(data_dir)
-    imported = 0
-    skipped = 0
-
+def _read_entries(csv_path: str) -> Iterator[dict]:
+    """CSV 행을 읽어 TransactionService.import_batch가 받는 형식으로 변환한다 (스트리밍)."""
     with open(csv_path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            try:
-                service.add(
-                    date=row["date"],
-                    type_=row["type"],
-                    category=row["category"],
-                    amount_str=row["amount"],
-                    memo=row.get("memo") or None,
-                    tags=parse_tags(row.get("tags") or ""),
-                )
-                imported += 1
-            except ValidationError:
-                skipped += 1
+            yield {
+                "date": row["date"],
+                "type_": row["type"],
+                "category": row["category"],
+                "amount_str": row["amount"],
+                "memo": row.get("memo") or None,
+                "tags": parse_tags(row.get("tags") or ""),
+            }
 
-    return imported, skipped
+
+def import_csv(data_dir: str, csv_path: str) -> tuple[int, int]:
+    """CSV에서 거래를 읽어 검증 후 한 번에 원자적으로 등록한다. (imported, skipped) 건수를 반환.
+
+    행 단위 즉시 append 대신, 유효한 행을 전부 모은 뒤 단일 원자적 쓰기(temp+os.replace)로
+    반영하므로 쓰기 도중 실패해도 이미 반영된 일부만 남는 상황이 생기지 않는다.
+    """
+    service = TransactionService(data_dir)
+    return service.import_batch(_read_entries(csv_path))
 
 
 def export_csv(data_dir: str, out_path: str, month: str | None, date_from: str | None, date_to: str | None) -> int:
