@@ -6,6 +6,7 @@ services.py가 던지는 AppError는 여기서 잡지 않고 그대로 위로 �
 __main__.py의 handle_errors 데코레이터가 최종 처리하게 한다.
 """
 
+from budget_app.cli import flow
 from budget_app.core.exceptions import ValidationError
 from budget_app.core.services import BudgetService, CategoryService, SummaryService, TransactionService
 from budget_app.sub.validators import parse_tags, validate_amount, validate_category_name, validate_date, validate_type
@@ -54,14 +55,12 @@ def run_add(args) -> None:
     tags = parse_tags(tags_raw)
 
     tx = service.add(date, type_, category, amount, memo, tags)
-    print(f"[저장 완료] id={tx.id}")
+    flow.print_add_result(tx)
 
 
 def run_list(args) -> None:
     service = TransactionService(args.data_dir)
-    for tx in service.list_transactions(limit=args.limit):
-        memo = tx.memo or ""
-        print(f"{tx.id} | {tx.date} | {tx.type:<7} | {tx.category} | {tx.amount:,} | {memo}")
+    flow.print_transactions(service.list_transactions(limit=args.limit))
 
 
 def run_search(args) -> None:
@@ -74,69 +73,46 @@ def run_search(args) -> None:
         query=args.q,
         tag=args.tag,
     )
-    if not results:
-        print("[검색 결과 없음]")
-        return
-    for tx in results:
-        memo = tx.memo or ""
-        print(f"{tx.id} | {tx.date} | {tx.type:<7} | {tx.category} | {tx.amount:,} | {memo}")
+    flow.print_transactions(results, empty_message="[검색 결과 없음]")
 
 
 def run_summary(args) -> None:
     service = SummaryService(args.data_dir)
     result = service.summarize(args.month, top=args.top)
-
-    if not result["has_data"]:
-        print(f"[데이터 없음] {args.month}에 해당하는 거래가 없습니다.")
-        return
-
-    print(f"총 수입: {result['total_income']}원")
-    print(f"총 지출: {result['total_expense']}원")
-    print(f"잔액: {result['balance']}원")
-
-    budget = result["budget"]
-    if budget is not None:
-        print(f"예산: {budget['amount']}원 (사용률 {budget['usage_rate']:.1f}%)")
-        if budget["over_budget"]:
-            print("[경고] 예산을 초과했습니다!")
-
-    print(f"\n지출 Category TOP {args.top}")
-    for i, (category, amount) in enumerate(result["top_categories"], start=1):
-        print(f"{i}) {category} {amount}원")
+    flow.print_summary(result, top=args.top)
 
 
 def run_budget_set(args) -> None:
     service = BudgetService(args.data_dir)
     budget = service.set(args.month, args.amount_str)
-    print(f"[저장 완료] {budget.month} 예산 {budget.amount}원")
+    flow.print_budget_set_result(budget)
 
 
 def run_category_add(args) -> None:
     service = CategoryService(args.data_dir)
     name = _prompt_valid("카테고리명: ", validate_category_name)
     service.add(name)
-    print(f"[저장 완료] category={name}")
+    flow.print_category_add_result(name)
 
 
 def run_category_list(args) -> None:
     service = CategoryService(args.data_dir)
-    for name in service.list_categories():
-        print(f"- {name}")
+    flow.print_category_list(service.list_categories())
 
 
 def run_category_remove(args) -> None:
     service = CategoryService(args.data_dir)
     transactions_path = f"{args.data_dir}/transactions.jsonl"
     service.remove(args.name, transactions_path)
-    print(f"[삭제 완료] category={args.name}")
-    
+    flow.print_category_remove_result(args.name)
+
 def run_category_rename(args) -> None:
     service = CategoryService(args.data_dir)
     transactions_path = f"{args.data_dir}/transactions.jsonl"
     old_name = validate_category_name(args.old_name)
     new_name = validate_category_name(args.new_name)
     service.rename(old_name, new_name, transactions_path)
-    print(f"[이름 변경 완료] {old_name} -> {new_name}")
+    flow.print_category_rename_result(old_name, new_name)
 
 def run_update(args) -> None:
     service = TransactionService(args.data_dir)
@@ -149,10 +125,10 @@ def run_update(args) -> None:
         memo=args.memo,
         tags=parse_tags(args.tags) if args.tags is not None else None,
     )
-    print(f"[수정 완료] id={tx.id}")
+    flow.print_update_result(tx)
 
 
 def run_delete(args) -> None:
     service = TransactionService(args.data_dir)
     service.delete(args.id)
-    print(f"[삭제 완료] id={args.id}")
+    flow.print_delete_result(args.id)
