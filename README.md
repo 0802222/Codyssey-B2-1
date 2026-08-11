@@ -1,8 +1,167 @@
-# 미션 개요
+# 나만의 용돈 기입장 (Budget App)
 
-# 수행 내역
+## 미션 개요
+
+Python 표준 라이브러리만으로 만든 콘솔 가계부 프로그램입니다. 거래 추가/조회/검색/수정/삭제,
+월별 요약, 예산 관리, 카테고리 관리, CSV import/export 기능을 제공하며, 데이터는 프로그램 종료
+후에도 JSONL 파일로 영구 저장됩니다.
+
+## 실행 방법
+
+```bash
+python -m budget_app <command> [options]
+```
+
+- Python 3.10 이상, 외부 라이브러리 없이 표준 라이브러리만 사용합니다.
+- 모든 명령은 `--help`로 사용법을 확인할 수 있습니다. (예: `python -m budget_app add --help`)
+- `--data-dir <path>` 옵션으로 데이터 저장 폴더를 변경할 수 있습니다. (기본값: `./data`)
+- `add`, `category add`는 대화형 입력(`input()`)을 사용하고, 나머지 명령(`list`, `search`,
+  `summary`, `budget set`, `category list/remove/rename`, `update`, `delete`, `import`,
+  `export`)은 옵션 인자 방식을 사용합니다.
+
+## 저장 파일 위치 및 형식
+
+기본 저장 폴더는 `./data`이며 아래 3개의 JSONL 파일로 분리 저장됩니다. 파일이 없으면 최초
+저장 시 자동 생성됩니다.
+
+| 파일 | 내용 | 스키마 |
+|---|---|---|
+| `transactions.jsonl` | 거래 내역 | `id, type(income/expense), date(YYYY-MM-DD), amount(양수 정수), category, memo(선택), tags(선택, 리스트)` |
+| `categories.jsonl` | 카테고리 목록 | `name` |
+| `budgets.jsonl` | 월별 예산 | `month(YYYY-MM), amount(정수)` |
+
+카테고리 파일이 비어 있는 상태에서 `add`를 실행하면, 등록되지 않은 카테고리 입력 시 그 자리에서
+바로 등록할지(`y`) 재입력할지(`n`)를 대화형으로 안내합니다. `category add`로 미리 등록해 두는
+방식도 그대로 지원합니다.
+
+`update`/`delete`/`category remove`/`category rename`처럼 파일 전체를 다시 쓰는 작업은 임시
+파일에 먼저 쓴 뒤 `os.replace`로 원자적 교체하여, 쓰기 도중 오류가 나도 원본 파일이 손상되지
+않도록 합니다.
+
+## 주요 명령어 예시
+
+### 거래 추가 (add, 대화형)
+```bash
+$ python -m budget_app add
+날짜(YYYY-MM-DD): 2024-01-15
+타입(income/expense): expense
+카테고리: food
+금액(양수): 15000
+메모(선택): 점심
+태그(쉼표로 구분, 없으면 엔터): meal
+[저장 완료] id=TX-000012
+```
+
+### 거래 목록 (list)
+```bash
+$ python -m budget_app list --limit 3
+TX-000012 | 2024-01-15 | expense | food | 15,000 | 점심
+```
+
+### 거래 검색 (search)
+```bash
+$ python -m budget_app search --from 2024-01-01 --to 2024-01-31 --category food --type expense --q 점심 --tag meal
+```
+
+### 월별 요약 (summary)
+```bash
+$ python -m budget_app summary --month 2024-01 --top 3
+총 수입: 3000000원
+총 지출: 215000원
+잔액: 2785000원
+예산: 500000원 (사용률 43.0%)
+
+지출 Category TOP 3
+1) rent 150000원
+```
+
+### 예산 설정/조회 (budget)
+```bash
+$ python -m budget_app budget set --month 2024-01 --amount 500000
+[저장 완료] 2024-01 예산 500000원
+```
+설정된 예산은 `summary` 실행 시 사용률·초과 경고와 함께 조회됩니다.
+
+### 카테고리 관리 (category)
+```bash
+$ python -m budget_app category add
+카테고리명: food
+[저장 완료] category=food
+
+$ python -m budget_app category list
+- food
+
+$ python -m budget_app category remove --name food   # 사용 중이면 CategoryInUseError로 거부
+$ python -m budget_app category rename --old-name food --new-name meal   # 보너스: 이름 변경(거래에도 반영)
+```
+
+### 거래 수정 (update) — 옵션 기반으로 고정
+요구사항의 "옵션 기반 / 대화형 기반" 중 **옵션 기반**으로 고정했습니다. `--id`는 필수이며,
+나머지 필드는 값을 준 것만 수정됩니다.
+```bash
+$ python -m budget_app update --id TX-000012 --amount 20000 --memo 저녁
+[수정 완료] id=TX-000012
+```
+
+### 거래 삭제 (delete)
+```bash
+$ python -m budget_app delete --id TX-000012
+[삭제 완료] id=TX-000012
+```
+존재하지 않는 id는 `NotFoundError`로 처리되어 `[오류]/[힌트]` 메시지를 출력합니다.
+
+### CSV import/export
+```bash
+$ python -m budget_app export --out export.csv --month 2024-01
+[완료] export.csv (12 records)
+
+$ python -m budget_app import --from import.csv
+[완료] imported=5, skipped=0
+```
+`export`는 `--month` 또는 `--from`/`--to` 중 하나 이상을 반드시 지정해야 합니다.
+
+CSV 스키마(고정, UTF-8, 헤더 포함):
+
+| column | required | 설명 |
+|---|---|---|
+| date | Y | YYYY-MM-DD |
+| type | Y | income / expense |
+| category | Y | 등록된 카테고리 |
+| amount | Y | 양수 정수 |
+| memo | N | 문자열 |
+| tags | N | 쉼표(,) 구분 문자열 |
+
+`import` 중 검증에 실패한 행은 건너뛰고(`skipped`), 나머지는 계속 처리합니다.
+
+## 오류 처리 규약
+
+- 모든 예외는 `AppError`(및 하위 클래스 `ValidationError`/`NotFoundError`/`DuplicateError`/
+  `CategoryInUseError`)로 표현되며, 스택트레이스 대신 `[오류] 원인` / `[힌트] 해결 방법` 두 줄만
+  출력합니다.
+- 정상 종료 시 exit code `0`, 오류 종료 시 `1`을 반환합니다.
+
+## 수행 내역
+
+- 도메인 모델(Transaction/Category/Budget) 및 예외 클래스 설계
+- argparse 기반 CLI, 4계층 구조(cli → core ← sub) 구현
+- 파일 기반 저장소(JSONL, 제너레이터 스트리밍, 원자적 재작성) 구현
+- 10대 필수 기능(add/list/search/summary/budget/category/update/delete/import/export) 구현 및 수동 검증
+- 보너스 과제(백업/반복 내역/테이블 정렬)는 이번 범위에서 구현하지 않음
 
 # Study
+## 디렉토리 분리
+의존성 관점에서 CLI, 핵심 로직, 하위 구현 분리
+```text
+cli  →  core  ←  sub
+```
+
+- cli: argparse, 사용자 입력/출력, 프로그램 실행 흐름만 담당
+- core: Transaction, 서비스, 유스케이스, 핵심 규칙 담당
+- sub: 파일 시스템·외부 API·저장소 등 세부 구현 담당
+- 루트 __main__.py: python -m project 실행 시 CLI를 호출하는 진입점
+- 루트 __init__.py: 비워 두거나 외부에 공개할 최소 API만 정의
+
+
 ## `__main__.py`
 ### 1. 실행 흐름
 `handle_errors`가 `main` 위에 붙는 순간, python 내부적으로는 이렇게 실행 된다.
@@ -111,6 +270,7 @@ options:
 적용 전
 ```python
 class Transaction:
+    # __init__ : 객체 새성시 자동으로 실행되며 필드값을 초기화한다.
     def __init__(self, id, type, date, amount, category, memo=None, tags=None):
         self.id = id
         self.type = type
@@ -119,8 +279,13 @@ class Transaction:
         self.category = category
         self.memo = memo
         self.tags = tags if tags is not None else []
+    
+    # __repr__ : 객체를 사람이 읽을 수 있는 문자열로 표현해주는 메서드 이다.
+    # 이게 없다면 콘솔에서 print(tx)를 했을 때 메모리주소만 찍혀서 디버깅 할 때 아무정보를 못얻는다.
     def __repr__(self):
         return f"Transaction(id={self.id!r}, type={self.type!r}, ...)"
+
+    # 두 객체를 == 로 비교할 때 어떤 기준으로 같다고 판단할지 정의 하는 메서드    
     def __eq__(self, other):
         return (self.id, self.type, ...) == (other.id, other.type, ...)
 ```
@@ -138,6 +303,17 @@ class Transaction:
     tags: list[str] = field(default_factory = list)
 ```
 
+### 1.1 dataclass(frozen=True)
+dataclass에 frozen=True 옵션을 주면, 생성 뒤 필드 재할당을 막아 읽기전용처럼 동작하게 한다.
+
+다만 Python에서 완전한 불변성을 보장하는 것은 아니고, 내부에 list나 dict 같은 가변 객체가 있으면 그 내부 내용은 바뀔 수 있다.
+
+반대로, transaction 자체가 처리 과정에서 status, retry_count, completed_at 등을 계속 갱신해야 하는 객체라면 frozen=True 는 맞지 않다.
+
+이런 경우 아래중 하나가 더 깔끔하다.
+- Transaction은 불변 명세로 유지하고, 실행 상태는 별도 TransactionResult 또는 TransactionState 로 관리
+- 상태 변경마다 dataclasses.replace()로 새 Transaction 생성
+- 애초에 상태를 가진 서비스/엔티티로 설계하고 frozen 을 적용하지 않음
 <br>
 
 ### 2. `field` 와 `default_factory의` 의미
@@ -190,3 +366,32 @@ tags: list[str] == feild(default_factory = list)
 | `Union`[X, Y]| X 또는 Y (여러 타입 허용)| 
 | `Any`| 아무 타입이나 허용(타입 체크 포기)| 
 | `Callable`[[Args], Return]| 함수 타입 (데코레이터 힌트에 씀)| 
+
+## repository.py
+### 1. 타입 힌트(return type annotation)
+```python
+def read_transactions(path: str) -> Iterator[Transaction]:
+```
+path(문자열)을 받아서 Iterator[Transaction]을 반환한다는 계약을 명시한다.
+
+### 2. 제너레이터
+파일 전체를 리스트로 만들어 메모리에 올리지 않고, "한 줄 읽고 -> 하나 내주고 -> 다음 요청 오면 또 한 줄" 이 반복된다.
+
+`yield` 는 함수를 제너레이터로 만들어주는 키워드 이다.
+
+`return` 은 값을 반환 하고 함수를 완전히 끝내지만,
+`yield` 는 값을 하나 내주고 함수 실행을 그자리에서 멈춘 채 대기한다. 다음에 또 값이 필요하면(예. for문에서 다음 반복) 멈췄던 지점부터 다시 이어서 실행한다.
+
+### 3. `**data` 의 의미
+`*(단일 별표)` 는 리스트/튜플을 위치 인자로 풀고,
+`**(이중 별표)` 는 딕셔너리를 키워드 인자(key=value)로 풀어준다.
+
+`**data` 는 딕셔너리인 data(json.loads(line)으로 만들어짐)를 키워드 인자로 풀어서(unpacking) 전달하는 문법이다.
+
+즉, 아래 두 코드는 완전히 같다.
+```python
+Transacntion(**data)
+
+# 위와 동일
+Transaction(id="TX-001", type="expense", data="2026-08-01", amount=15000, category="food")
+```
