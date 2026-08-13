@@ -23,3 +23,8 @@ htmlcov/
 
 # Runtime data (개인 실행 데이터, 저장소 위치는 README 참고)
 data/
+
+.loom
+.claude
+AGENTS.md
+CLAUDE.md

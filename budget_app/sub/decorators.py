@@ -34,7 +34,7 @@ def handle_errors(func: F) -> F:
             sys.exit(1)
         except KeyboardInterrupt:
             print("\n[취소] 사용자가 입력을 중단했습니다.")
-            sys.exit(1)
+            sys.exit(130)
 
     return wrapper  # type: ignore[return-value]
 
