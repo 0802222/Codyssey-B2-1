@@ -34,6 +34,11 @@ python -m budget_app <command> [options]
 바로 등록할지(`y`) 재입력할지(`n`)를 대화형으로 안내합니다. `category add`로 미리 등록해 두는
 방식도 그대로 지원합니다.
 
+**초기 실행 / 재실행 시나리오**: `./data`(또는 `--data-dir`로 지정한 폴더)와 3개 JSONL 파일은
+처음 저장이 일어나는 시점에 자동 생성됩니다(파일이 없다고 오류를 내지 않습니다). 이후
+프로그램을 재실행해도 같은 `--data-dir`을 가리키는 한 이전에 저장한 거래/카테고리/예산이
+그대로 유지됩니다 — 별도의 초기화나 마이그레이션 절차가 필요 없습니다.
+
 `update`/`delete`/`category remove`/`category rename`처럼 파일 전체를 다시 쓰는 작업은 임시
 파일에 먼저 쓴 뒤 `os.replace`로 원자적 교체하여, 쓰기 도중 오류가 나도 원본 파일이 손상되지
 않도록 합니다.
@@ -115,6 +120,13 @@ $ python -m budget_app budget set --month 2024-01 --amount 500000
 ```
 설정된 예산은 `summary` 실행 시 사용률·초과 경고와 함께 조회됩니다.
 
+`budget set --amount`는 `validate_amount`에서 0 이하 금액을 거부하므로, 정상 흐름에서
+예산 금액은 항상 양수만 저장됩니다("무제한 예산"이라는 개념 자체가 없습니다). `summarize()`의
+`(total_expense / budget.amount * 100) if budget.amount else 0`은 0으로 나누기를 막는 방어
+코드일 뿐, 실제 CLI로는 도달할 일이 없습니다. 예산 관리를 아예 안 하려면 `budget set` 자체를
+하지 않으면 됩니다 — `summary`는 예산이 설정되지 않은 달에는 예산 관련 줄을 아예 출력하지
+않습니다.
+
 ### 카테고리 관리 (category)
 ```bash
 $ python -m budget_app category add
@@ -127,6 +139,11 @@ $ python -m budget_app category list
 $ python -m budget_app category remove --name food   # 사용 중이면 CategoryInUseError로 거부
 $ python -m budget_app category rename --old-name food --new-name meal   # 보너스: 이름 변경(거래에도 반영)
 ```
+
+카테고리 삭제 정책은 요구사항의 "삭제를 막거나 대체 카테고리를 요구" 중 **차단(막기)** 을
+선택했습니다 — 사용 중인 카테고리는 `CategoryInUseError`로 삭제 자체가 거부됩니다. 다른
+카테고리로 옮기고 싶다면 해당 거래들을 `update --category`로 먼저 옮기거나, 카테고리 자체를
+없애지 않고 `category rename`으로 이름만 바꾸면 됩니다.
 
 ### 거래 수정 (update) — 옵션 기반으로 고정
 요구사항의 "옵션 기반 / 대화형 기반" 중 **옵션 기반**으로 고정했습니다. `--id`는 필수이며,
@@ -175,7 +192,24 @@ CSV 스키마(고정, UTF-8, 헤더 포함):
 - 모든 예외는 `AppError`(및 하위 클래스 `ValidationError`/`NotFoundError`/`DuplicateError`/
   `CategoryInUseError`)로 표현되며, 스택트레이스 대신 `[오류] 원인` / `[힌트] 해결 방법` 두 줄만
   출력합니다.
-- 정상 종료 시 exit code `0`, 오류 종료 시 `1`을 반환합니다.
+- 정상 종료 시 exit code `0`, `AppError` 발생 시 `1`, `Ctrl+C`로 입력을 중단한 경우 관례적인
+  SIGINT 종료 코드인 `130`을 반환합니다(`sub/decorators.py`의 `handle_errors`).
+- 셸에서 종료 코드는 명령 실행 직후 `echo $?`로 확인할 수 있습니다.
+  ```bash
+  $ python -m budget_app delete --id TX-999999
+  [오류] id=TX-999999 거래를 찾을 수 없습니다.
+  [힌트] list로 존재하는 id를 확인하세요.
+  $ echo $?
+  1
+  ```
+
+### 공통 관심사 데코레이터 적용 위치 (`sub/decorators.py`)
+
+| 데코레이터 | 적용 대상 | 역할 |
+|---|---|---|
+| `@handle_errors` | `__main__.py`의 `main()` (진입점 1곳) | `AppError`/`KeyboardInterrupt`를 잡아 스택트레이스 없이 출력하고 exit code 결정 |
+| `@log_call` | `TransactionService.add/delete/update`, `import_batch` | 호출 시작/종료를 stderr에 로그 |
+| `@measure_time` | `TransactionService.list_transactions/search/import_batch` | 실행 시간을 stderr에 로그 |
 
 ## 수행 내역
 
@@ -197,6 +231,24 @@ cli  →  core  ←  sub
 - sub: 파일 시스템·외부 API·저장소 등 세부 구현 담당
 - 루트 __main__.py: python -m project 실행 시 CLI를 호출하는 진입점
 - 루트 __init__.py: 비워 두거나 외부에 공개할 최소 API만 정의
+
+### 계층별 핵심 진입점
+
+| 계층 | 파일 | 핵심 함수/클래스 |
+|---|---|---|
+| cli | `cli/app.py` | `run_add/run_list/run_search/run_summary/run_budget_set/run_category_*/run_update/run_delete` |
+| cli | `cli/flow.py` | `print_transactions/print_summary/print_*_result` (출력 전담) |
+| core | `core/models.py` | `Transaction/Category/Budget` — **데이터만** 표현, 검증·저장 로직 없음 |
+| core | `core/services.py` | `TransactionService/CategoryService/BudgetService/SummaryService` — **검증·계산·비즈니스 규칙** 담당, models를 조립해 repository에 위임 |
+| core | `core/repository.py` | `read_transactions(제너레이터)/append_transaction/rewrite_all_*` — 파일 I/O만 담당 |
+| sub | `sub/validators.py` | `validate_date/validate_amount/...` |
+| sub | `sub/decorators.py` | `handle_errors/log_call/measure_time` |
+| sub | `sub/io_csv.py` | `import_csv/export_csv` |
+
+즉 **models는 순수 데이터, services는 검증과 비즈니스 로직, repository는 파일 I/O**라는
+책임 경계를 명시적으로 나눴습니다 — 예를 들어 카테고리 존재 검증은 `CategoryService.exists`가
+하지, `Category` 모델이나 `repository.read_categories`는 데이터를 읽고 표현만 할 뿐 검증하지
+않습니다.
 
 
 ## `__main__.py`
