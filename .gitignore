@@ -24,6 +24,11 @@ htmlcov/
 # Runtime data (개인 실행 데이터, 저장소 위치는 README 참고)
 data/
 
+# scripts/demo.sh 실행 결과물
+demo_data/
+demo_export.csv
+demo_import.csv
+
 .loom
 .claude
 AGENTS.md
