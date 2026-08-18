@@ -20,6 +20,7 @@ from budget_app.core.repository import (
     rewrite_all_categories,
     rewrite_all_transactions,
 )
+from budget_app.sub.decorators import log_call, measure_time
 from budget_app.sub.validators import validate_amount, validate_category_name, validate_date, validate_month, validate_type
 
 
@@ -94,6 +95,7 @@ class TransactionService:
     def _next_id(self) -> str:
         return f"TX-{self._max_id_num(list(read_transactions(self.path))) + 1:06d}"
 
+    @log_call
     def add(
         self,
         date: str,
@@ -124,6 +126,8 @@ class TransactionService:
         append_transaction(self.path, tx)
         return tx
 
+    @measure_time
+    @log_call
     def import_batch(self, entries: Iterable[dict]) -> tuple[int, int]:
         """검증된 거래를 메모리에 버퍼링한 뒤 한 번에 원자적으로 반영한다.
 
@@ -171,10 +175,12 @@ class TransactionService:
 
         return len(buffered), skipped
 
+    @measure_time
     def list_transactions(self, limit: int = 10) -> list[Transaction]:
         all_tx = sorted(read_transactions(self.path), key=lambda t: t.date, reverse=True)
         return all_tx[:limit]
 
+    @measure_time
     def search(
         self,
         date_from: Optional[str] = None,
@@ -202,6 +208,7 @@ class TransactionService:
         filtered = (tx for tx in read_transactions(self.path) if matches(tx))
         return sorted(filtered, key=lambda t: (t.date, t.amount), reverse=True)
 
+    @log_call
     def delete(self, tx_id: str) -> None:
         all_tx = list(read_transactions(self.path))
         filtered = [t for t in all_tx if t.id != tx_id]
@@ -212,6 +219,7 @@ class TransactionService:
             )
         rewrite_all_transactions(self.path, filtered)
 
+    @log_call
     def update(
         self,
         tx_id: str,
