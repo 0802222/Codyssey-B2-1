@@ -2,9 +2,14 @@
 
 ## 미션 개요
 
-Python 표준 라이브러리만으로 만든 콘솔 가계부 프로그램입니다. 거래 추가/조회/검색/수정/삭제,
-월별 요약, 예산 관리, 카테고리 관리, CSV import/export 기능을 제공하며, 데이터는 프로그램 종료
-후에도 JSONL 파일로 영구 저장됩니다.
+Python 표준 라이브러리만으로 만든 `콘솔 가계부 프로그램`입니다. 
+- 거래 추가/조회/검색/수정/삭제
+- 월별 요약
+- 예산 관리
+- 카테고리 관리
+- CSV import/export 기능
+    (데이터는 프로그램 종료
+후에도 JSONL 파일로 영구 저장)
 
 ## 실행 방법
 
@@ -12,17 +17,18 @@ Python 표준 라이브러리만으로 만든 콘솔 가계부 프로그램입�
 python -m budget_app <command> [options]
 ```
 
-- Python 3.10 이상, 외부 라이브러리 없이 표준 라이브러리만 사용합니다.
-- 모든 명령은 `--help`로 사용법을 확인할 수 있습니다. (예: `python -m budget_app add --help`)
-- `--data-dir <path>` 옵션으로 데이터 저장 폴더를 변경할 수 있습니다. (기본값: `./data`)
+- Python 3.10 이상, 외부 라이브러리 없이 표준 라이브러리만 사용
+- 모든 명령은 `--help`로 사용법 확인 (예: `python -m budget_app add --help`)
+- `--data-dir <path>` 옵션으로 데이터 저장 폴더 변경 가능 (기본값: `./data`)
 - `add`, `category add`는 대화형 입력(`input()`)을 사용하고, 나머지 명령(`list`, `search`,
   `summary`, `budget set`, `category list/remove/rename`, `update`, `delete`, `import`,
-  `export`)은 옵션 인자 방식을 사용합니다.
+  `export`)은 옵션 인자 방식 사용
 
 ## 저장 파일 위치 및 형식
 
-기본 저장 폴더는 `./data`이며 아래 3개의 JSONL 파일로 분리 저장됩니다. 파일이 없으면 최초
-저장 시 자동 생성됩니다.
+기본 저장 폴더는 `./data`이며 아래 3개의 JSONL 파일로 분리 저장된다.
+(파일이 없으면 최초
+저장 시 자동 생성된다.)
 
 | 파일 | 내용 | 스키마 |
 |---|---|---|
@@ -43,39 +49,20 @@ python -m budget_app <command> [options]
 파일에 먼저 쓴 뒤 `os.replace`로 원자적 교체하여, 쓰기 도중 오류가 나도 원본 파일이 손상되지
 않도록 합니다.
 
-### 왜 내부 저장 포맷으로 JSONL을 선택했나 (JSONL vs CSV)
+# 시연
+```bash
+# apt install
+sudo apt-get update -y
+sudo apt-get install -y git nano python3 python3-venv
 
-요구사항은 JSONL/CSV 중 택1을 허용하지만, 이 프로젝트는 **내부 저장은 JSONL, 외부 교환은
-CSV**로 용도를 분리했습니다. 이유는 다음과 같습니다.
+# git clone
+git clone https://github.com/0802222/Codyssey-B2-1 ~/Codyssey-B2-1
 
-| 관점 | JSONL | CSV |
-|---|---|---|
-| 스트리밍 처리 | 한 줄 = 완결된 레코드라서 `for line in f: json.loads(line)`으로 한 줄씩 즉시 파싱 가능 (`repository.py`의 `read_transactions`가 제너레이터로 구현) | `csv.DictReader`도 스트리밍은 되지만, 필드 안에 쉼표/줄바꿈이 섞이면 quoting 규칙에 의존해야 해서 파싱이 더 민감함 |
-| 스키마 유연성 | 레코드마다 독립적인 JSON 객체라 `tags`처럼 리스트 값이나 선택적 필드(`memo`)를 자연스럽게 표현. 필드 추가 시 기존 줄은 그대로 두고 새 줄부터 필드를 늘려도 파싱이 깨지지 않음 | 모든 행이 같은 컬럼 수/순서를 강제해야 함. `tags`처럼 다중값 필드는 쉼표 구분 문자열로 다시 인코딩해야 해서 표현력이 떨어짐(현재 CSV export에서 `",".join(tx.tags)`로 우회) |
-| 수정 시 원자성 | 레코드 단위 append(`append_transaction`)가 가능해 `add`는 파일 전체를 안 건드리고 한 줄만 추가. `update`/`delete`만 전체 재작성(`rewrite_all_transactions` + `os.replace`) | CSV도 append 자체는 가능하지만, 헤더 한 줄을 전체 파일이 공유하기 때문에 사실상 JSONL과 비슷한 이점은 없고 quoting 이슈만 추가됨 |
-| 사람이 읽기/디버깅 | 한 줄에 레코드 하나라 `tail -f`, `grep`으로 특정 거래를 바로 찾기 쉬움 | 표 형태로 한눈에 보기는 더 좋지만, 필드에 쉼표/줄바꿈이 있으면 눈으로 읽기 어려움 |
-| 도구 호환성 | 표준 라이브러리 `json`만으로 충분 | 엑셀/시트 도구와의 호환성이 높음 → **import/export 스키마를 CSV로 고정**한 이유 |
-
-결론: **거래가 계속 추가·수정·삭제되는 내부 저장소**에는 레코드 단위 append와 스트리밍 파싱이
-유리한 JSONL을 쓰고, **다른 도구(엑셀 등)와 주고받는 경계**에는 범용성이 높은 CSV를 그대로
-유지해 요구사항의 CSV 스키마(위 표)를 만족시켰습니다.
-
-## 대용량(10만 건 이상) 시나리오 병목 분석
-
-`transactions.jsonl`이 10만 건 이상으로 커졌을 때 실제로 느려지는 지점과 개선 방향입니다.
-
-| 병목 지점 | 코드 근거 | 문제 | 개선 방안 |
-|---|---|---|---|
-| **`add`할 때마다 ID 채번을 위해 전체 스캔** | `TransactionService._next_id()`가 매번 `read_transactions(self.path)`를 끝까지 순회하며 최대 번호를 계산 | 거래 1건 추가에 O(n) — 10만 건째 거래를 추가할 때 이전 99,999건을 전부 다시 읽음. `add`를 반복할수록 전체적으로 O(n²) | 마지막으로 발급한 ID를 별도 카운터 파일(예: `data/.next_id`)이나 `budgets.jsonl`처럼 작은 메타 파일에 캐시해 O(1)로 다음 ID를 계산 |
-| **`list`/`search`의 전체 정렬** | `list_transactions`/`search`가 제너레이터로 읽어들인 뒤 `sorted(...)`로 전체를 메모리에 올려 정렬 | `list --limit 10`처럼 일부만 필요해도 10만 건을 전부 메모리에 올리고 정렬(O(n log n)) | 날짜 역순이 대부분의 목적이라면, append 시 항상 날짜 오름차순을 유지하도록 삽입 위치를 관리하거나, 파일을 월별로 분할해 최근 파일부터 역순으로 읽는 방식으로 실질적인 스캔 범위를 줄일 수 있음 |
-| **`update`/`delete`/`category rename`의 전체 재작성** | `rewrite_all_transactions`가 매번 전체 리스트를 새 임시 파일에 다시 씀 | 거래 1건만 수정해도 나머지 99,999건을 통째로 다시 씀 (O(n) I/O) | 원자성을 위해 "전체 재작성"은 유지하되, 빈도가 낮은 명령(update/delete)에서만 감수하는 트레이드오프로 명시. 빈도가 훨씬 높은 `add`는 이미 append 전용이라 이 비용에서 제외되어 있음 |
-| **`summary`의 월별 집계** | `SummaryService.summarize`가 매번 `transactions.jsonl` 전체를 순회하며 해당 월만 필터링 | 특정 월 요약 1번에도 전체 파일을 스캔(O(n)) | 저장을 월별 파일(`transactions-2024-01.jsonl` 등)로 분할하면 해당 월 파일만 읽어 스캔 범위를 줄일 수 있음 |
-
-**정리**: 현재 구조에서 가장 급한 병목은 `_next_id()`의 전체 스캔입니다(모든 `add` 호출마다
-발생하며 누적 시 O(n²)). `update`/`delete`의 전체 재작성은 원자성 확보를 위한 의도된 트레이드
-오프이고 호출 빈도도 낮아 상대적으로 덜 급합니다. 이번 범위에서는 분석까지만 진행하고 실제
-개선 구현(카운터 파일, 월별 파일 분할 등)은 하지 않았습니다.
-
+# script 실행
+cd ~/Codyssey-B2-1
+chmod +x scripts/demo.sh
+./scripts/demo.sh
+```
 ## 주요 명령어 예시
 
 ### 거래 추가 (add, 대화형)
@@ -484,3 +471,37 @@ Transacntion(**data)
 # 위와 동일
 Transaction(id="TX-001", type="expense", data="2026-08-01", amount=15000, category="food")
 ```
+
+
+### 왜 내부 저장 포맷으로 JSONL을 선택했나 (JSONL vs CSV)
+
+요구사항은 JSONL/CSV 중 택1을 허용하지만, 이 프로젝트는 **내부 저장은 JSONL, 외부 교환은
+CSV**로 용도를 분리했습니다. 이유는 다음과 같습니다.
+
+| 관점 | JSONL | CSV |
+|---|---|---|
+| 스트리밍 처리 | 한 줄 = 완결된 레코드라서 `for line in f: json.loads(line)`으로 한 줄씩 즉시 파싱 가능 (`repository.py`의 `read_transactions`가 제너레이터로 구현) | `csv.DictReader`도 스트리밍은 되지만, 필드 안에 쉼표/줄바꿈이 섞이면 quoting 규칙에 의존해야 해서 파싱이 더 민감함 |
+| 스키마 유연성 | 레코드마다 독립적인 JSON 객체라 `tags`처럼 리스트 값이나 선택적 필드(`memo`)를 자연스럽게 표현. 필드 추가 시 기존 줄은 그대로 두고 새 줄부터 필드를 늘려도 파싱이 깨지지 않음 | 모든 행이 같은 컬럼 수/순서를 강제해야 함. `tags`처럼 다중값 필드는 쉼표 구분 문자열로 다시 인코딩해야 해서 표현력이 떨어짐(현재 CSV export에서 `",".join(tx.tags)`로 우회) |
+| 수정 시 원자성 | 레코드 단위 append(`append_transaction`)가 가능해 `add`는 파일 전체를 안 건드리고 한 줄만 추가. `update`/`delete`만 전체 재작성(`rewrite_all_transactions` + `os.replace`) | CSV도 append 자체는 가능하지만, 헤더 한 줄을 전체 파일이 공유하기 때문에 사실상 JSONL과 비슷한 이점은 없고 quoting 이슈만 추가됨 |
+| 사람이 읽기/디버깅 | 한 줄에 레코드 하나라 `tail -f`, `grep`으로 특정 거래를 바로 찾기 쉬움 | 표 형태로 한눈에 보기는 더 좋지만, 필드에 쉼표/줄바꿈이 있으면 눈으로 읽기 어려움 |
+| 도구 호환성 | 표준 라이브러리 `json`만으로 충분 | 엑셀/시트 도구와의 호환성이 높음 → **import/export 스키마를 CSV로 고정**한 이유 |
+
+결론: **거래가 계속 추가·수정·삭제되는 내부 저장소**에는 레코드 단위 append와 스트리밍 파싱이
+유리한 JSONL을 쓰고, **다른 도구(엑셀 등)와 주고받는 경계**에는 범용성이 높은 CSV를 그대로
+유지해 요구사항의 CSV 스키마(위 표)를 만족시켰습니다.
+
+## 대용량(10만 건 이상) 시나리오 병목 분석
+
+`transactions.jsonl`이 10만 건 이상으로 커졌을 때 실제로 느려지는 지점과 개선 방향입니다.
+
+| 병목 지점 | 코드 근거 | 문제 | 개선 방안 |
+|---|---|---|---|
+| **`add`할 때마다 ID 채번을 위해 전체 스캔** | `TransactionService._next_id()`가 매번 `read_transactions(self.path)`를 끝까지 순회하며 최대 번호를 계산 | 거래 1건 추가에 O(n) — 10만 건째 거래를 추가할 때 이전 99,999건을 전부 다시 읽음. `add`를 반복할수록 전체적으로 O(n²) | 마지막으로 발급한 ID를 별도 카운터 파일(예: `data/.next_id`)이나 `budgets.jsonl`처럼 작은 메타 파일에 캐시해 O(1)로 다음 ID를 계산 |
+| **`list`/`search`의 전체 정렬** | `list_transactions`/`search`가 제너레이터로 읽어들인 뒤 `sorted(...)`로 전체를 메모리에 올려 정렬 | `list --limit 10`처럼 일부만 필요해도 10만 건을 전부 메모리에 올리고 정렬(O(n log n)) | 날짜 역순이 대부분의 목적이라면, append 시 항상 날짜 오름차순을 유지하도록 삽입 위치를 관리하거나, 파일을 월별로 분할해 최근 파일부터 역순으로 읽는 방식으로 실질적인 스캔 범위를 줄일 수 있음 |
+| **`update`/`delete`/`category rename`의 전체 재작성** | `rewrite_all_transactions`가 매번 전체 리스트를 새 임시 파일에 다시 씀 | 거래 1건만 수정해도 나머지 99,999건을 통째로 다시 씀 (O(n) I/O) | 원자성을 위해 "전체 재작성"은 유지하되, 빈도가 낮은 명령(update/delete)에서만 감수하는 트레이드오프로 명시. 빈도가 훨씬 높은 `add`는 이미 append 전용이라 이 비용에서 제외되어 있음 |
+| **`summary`의 월별 집계** | `SummaryService.summarize`가 매번 `transactions.jsonl` 전체를 순회하며 해당 월만 필터링 | 특정 월 요약 1번에도 전체 파일을 스캔(O(n)) | 저장을 월별 파일(`transactions-2024-01.jsonl` 등)로 분할하면 해당 월 파일만 읽어 스캔 범위를 줄일 수 있음 |
+
+**정리**: 현재 구조에서 가장 급한 병목은 `_next_id()`의 전체 스캔입니다(모든 `add` 호출마다
+발생하며 누적 시 O(n²)). `update`/`delete`의 전체 재작성은 원자성 확보를 위한 의도된 트레이드
+오프이고 호출 빈도도 낮아 상대적으로 덜 급합니다. 이번 범위에서는 분석까지만 진행하고 실제
+개선 구현(카운터 파일, 월별 파일 분할 등)은 하지 않았습니다.
