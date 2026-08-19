@@ -7,7 +7,7 @@ __main__.py(CLI)와 repository.py(파일 I/O) 사이의 중간 계층.
 
 import os
 from collections import defaultdict
-from typing import Iterable, Iterator, Optional
+from typing import Iterable, Optional
 
 from budget_app.core.exceptions import CategoryInUseError, DuplicateError, NotFoundError, ValidationError
 from budget_app.core.models import Budget, Category, Transaction
@@ -16,9 +16,11 @@ from budget_app.core.repository import (
     read_budgets,
     read_categories,
     read_transactions,
+    read_tx_counter,
     rewrite_all_budgets,
     rewrite_all_categories,
     rewrite_all_transactions,
+    write_tx_counter
 )
 from budget_app.sub.decorators import log_call, measure_time
 from budget_app.sub.validators import validate_amount, validate_category_name, validate_date, validate_month, validate_type
@@ -84,6 +86,7 @@ class TransactionService:
     def __init__(self, data_dir: str) -> None:
         self.data_dir = data_dir
         self.path = os.path.join(data_dir, "transactions.jsonl")
+        self.counter_path = os.path.join(data_dir, "transactions.seq")
         self.category_service = CategoryService(data_dir)
 
     def _max_id_num(self, transactions: list[Transaction]) -> int:
@@ -92,8 +95,21 @@ class TransactionService:
             max_num = max(max_num, int(tx.id.split("-")[-1]))
         return max_num
 
+    def _last_issued_num(self) -> int:
+        """마지막으로 발급된 거래 번호
+        
+        삭제된 거래의 번호가 재사용되지 않도록 카운터 파일에 영속 시킨다.
+        카운터 파일이 아직 없는 경우(예: 이 기능 도입 전 데이터)에는 기존 파일에 남아있는 거래의 최댓값으로 초기화한다.
+        """
+        counter = read_tx_counter(self.counter_path)
+        if counter is not None:
+            return counter
+        return self._max_id_num(list(read_transactions(self.path)))
+
     def _next_id(self) -> str:
-        return f"TX-{self._max_id_num(list(read_transactions(self.path))) + 1:06d}"
+        next_num = self._last_issued_num() + 1
+        write_tx_counter(self.counter_path, next_num)
+        return f"TX-{next_num:06d}"
 
     @log_call
     def add(
@@ -135,7 +151,7 @@ class TransactionService:
         쓰기 도중 실패해도 원본 파일은 그대로 남고(all-or-nothing) 부분 반영되지 않는다.
         """
         existing = list(read_transactions(self.path))
-        next_num = self._max_id_num(existing)
+        next_num = self._last_issued_num()
 
         buffered: list[Transaction] = []
         skipped = 0
@@ -172,6 +188,7 @@ class TransactionService:
 
         if buffered:
             rewrite_all_transactions(self.path, existing + buffered)
+            write_tx_counter(self.counter_path, next_num)
 
         return len(buffered), skipped
 

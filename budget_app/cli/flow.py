@@ -27,7 +27,7 @@ def print_add_result(tx: Transaction) -> None:
 
 def print_summary(result: dict, top: int) -> None:
     if not result["has_data"]:
-        print(f"[데이터 없음] {result['month']}에 해당하는 거래가 없습니다.")
+        print(f"[데이터 없음] {result['month']} 에 해당하는 거래가 없습니다.")
         return
 
     print(f"총 수입: {result['total_income']}원")

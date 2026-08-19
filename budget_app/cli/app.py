@@ -60,7 +60,7 @@ def run_add(args) -> None:
 
 def run_list(args) -> None:
     service = TransactionService(args.data_dir)
-    flow.print_transactions(service.list_transactions(limit=args.limit))
+    flow.print_transactions(service.list_transactions(limit=args.limit), empty_message="[아직 등록된 거래가 없습니다.]")
 
 
 def run_search(args) -> None:

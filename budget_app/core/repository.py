@@ -11,7 +11,7 @@
 import json
 import os
 import tempfile
-from typing import Iterator
+from typing import Iterator, Optional
 
 from budget_app.core.models import Budget, Category, Transaction
 
@@ -53,6 +53,31 @@ def rewrite_all_transactions(path: str, transactions: list[Transaction]) -> None
             os.remove(tmp_path)
         raise
 
+
+# ── Transaction ID Counter ───────────────────────────────────
+
+def read_tx_counter(path: str) -> Optional[int]:
+    """마지막으로 발급된 거래 번호를 반환한다. 카운터 파일이 없으면 None."""
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read().strip()
+    return int(content) if content else None
+
+
+def write_tx_counter(path: str, value: int) -> None:
+    """마지막으로 발급된 거래 번호를 원자적으로 기록한다."""
+    dir_name = os.path.dirname(path) or "."
+    os.makedirs(dir_name, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix=".tmp_", suffix=".seq")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(str(value))
+        os.replace(tmp_path, path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
 # ── Category ─────────────────────────────────────────────────
 
