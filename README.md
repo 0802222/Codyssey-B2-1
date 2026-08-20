@@ -179,8 +179,10 @@ CSV 스키마(고정, UTF-8, 헤더 포함):
 - 모든 예외는 `AppError`(및 하위 클래스 `ValidationError`/`NotFoundError`/`DuplicateError`/
   `CategoryInUseError`)로 표현되며, 스택트레이스 대신 `[오류] 원인` / `[힌트] 해결 방법` 두 줄만
   출력합니다.
-- 정상 종료 시 exit code `0`, `AppError` 발생 시 `1`, `Ctrl+C`로 입력을 중단한 경우 관례적인
-  SIGINT 종료 코드인 `130`을 반환합니다(`sub/decorators.py`의 `handle_errors`).
+- 정상 종료 시 exit code `0`, `AppError` 발생 시 `1`, `Ctrl+C`(`KeyboardInterrupt`)로 입력을
+  중단한 경우 관례적인 SIGINT 종료 코드인 `130`을 반환합니다. `Ctrl+D`(`EOFError`, 입력 스트림
+  EOF)도 사용자가 입력을 취소한 것으로 보고 동일하게 `130`을 반환합니다(`sub/decorators.py`의
+  `handle_errors`).
 - 셸에서 종료 코드는 명령 실행 직후 `echo $?`로 확인할 수 있습니다.
   ```bash
   $ python -m budget_app delete --id TX-999999
@@ -194,7 +196,7 @@ CSV 스키마(고정, UTF-8, 헤더 포함):
 
 | 데코레이터 | 적용 대상 | 역할 |
 |---|---|---|
-| `@handle_errors` | `__main__.py`의 `main()` (진입점 1곳) | `AppError`/`KeyboardInterrupt`를 잡아 스택트레이스 없이 출력하고 exit code 결정 |
+| `@handle_errors` | `__main__.py`의 `main()` (진입점 1곳) | `AppError`/`KeyboardInterrupt`/`EOFError`를 잡아 스택트레이스 없이 출력하고 exit code 결정 |
 | `@log_call` | `TransactionService.add/delete/update`, `import_batch` | 호출 시작/종료를 stderr에 로그 |
 | `@measure_time` | `TransactionService.list_transactions/search/import_batch` | 실행 시간을 stderr에 로그 |
 

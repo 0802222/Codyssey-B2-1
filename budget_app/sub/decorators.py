@@ -32,6 +32,12 @@ def handle_errors(func: F) -> F:
         except KeyboardInterrupt:
             print("\n[취소] 사용자가 입력을 중단했습니다.")
             sys.exit(130)
+        except EOFError:
+            print("\n[취소] 입력이 종료되었습니다(Ctrl+D).")
+            sys.exit(130)
+        except Exception as e:
+            print(f"[오류] 알 수 없는 오류가 발생했습니다: {e}")
+            sys.exit(1)
 
     return wrapper  # type: ignore[return-value]
 
